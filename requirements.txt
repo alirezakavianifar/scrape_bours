@@ -1,0 +1,13 @@
+pandas
+tqdm
+selenium
+beautifulsoup4
+xlrd
+jdatetime
+xlwings
+psutil
+pyodbc
+openpyxl
+keyboard
+lxml
+-e .
