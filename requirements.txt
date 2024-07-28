@@ -1,5 +1,6 @@
 pandas
 tqdm
+requests
 selenium
 beautifulsoup4
 xlrd

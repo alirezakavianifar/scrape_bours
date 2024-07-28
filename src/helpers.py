@@ -1,9 +1,12 @@
 import os
 import selenium
+from urllib.parse import urlparse
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import Select
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 import time
@@ -134,58 +137,44 @@ def init_driver(pathsave, driver_type='firefox', headless=False, prefs={'maximiz
 
     finally:
         driver.quit()  # Ensuring WebDriver is properly closed after use
+        
+def extract_data(driver, info, elms_info):
+    
+    table_data = []
+    html_source = driver.page_source
+    soup = BeautifulSoup(html_source, 'lxml')
+    # Text to find within the HTML
+    text_to_find = 'نتیجه ای برای نمایش وجود ندارد.'
+    # Find all <td> tags with specific text
+    results = [td_tag.get_text(strip=True) for td_tag in soup.find_all('td')]
+    
+    if text_to_find in results:
+        return driver, info, table_data        
+    
+    elements = soup.find_all(elms_info['tag_name'], class_=elms_info['class_'])
+    for elm in elements:
+        try:
+            # Extract data from each <td> in the rows
+            row_data = []
+            notice_link = ""
+            for cell in elm.find_all('td'):
+                # Get text inside the cell, stripping extra whitespace
+                cell_text = cell.get_text(strip=True)
+                row_data.append(cell_text)
+                if cell.attrs['data-th'] == 'اطلاعیه':
+                    notice_link = cell.find('a')['href'] if cell.find('a') else ''
+                    parsed_url = urlparse(info['url'])
+                    # Extract the base URL
+                    base_url = f"{parsed_url.scheme}://{parsed_url.netloc}{notice_link}"
+                    row_data.append(base_url)
+                
+            table_data.append(row_data)
+        except:
+            continue
+    return driver, info, table_data
 
 def generic_scrape(driver, info, elements_info, pagination_info=None, url=None):
     data = defaultdict(list)
-
-    def extract_data(soup, elements_info, url):
-        page_not_found = False
-        title = ''
-        date = ''
-        link = ''
-        elements = soup.find_all(elements_info['element_tag'], class_=elements_info['element_class'])
-        for elm in elements:
-            try:
-                title_element = elm.find(elements_info['title_tag'], class_=elements_info['title_class'])
-                if title_element.get('title') is not None:
-                    title = title_element.get('title')
-                else:
-                    title = title_element.get_text(strip=True) if title_element else ''
-
-                error_element = elm.find(elements_info['error_tag'], class_=elements_info['error_class'])
-                error_title = error_element.get_text(strip=True) if error_element else ''
-                if error_title:
-                    print('Page not found')
-                    page_not_found = True
-                    break
-                if title == '':
-                    print('Title not found')
-                    
-                date_element = elm.find(elements_info['date_tag'], class_=elements_info['date_class'])
-                if date_element is not None:
-                    date = date_element.get_text(strip=True) if date_element else ''
-                    if date == '':
-                        if date_element.get('title') is not None:
-                            date = date_element.get('title')
-
-                if elm.name == 'a' and elm.get('href'):
-                    if title == '' and elm.get('title'):
-                        title = elm.get('title')
-                    link = elm.get('href')
-                else:
-                    link_element = elm.find(elements_info['link_tag'], class_=elements_info['link_class'])
-                    link = link_element['href'] if link_element else url
-
-                if url == 'https://www.iosco.org/media_room/?subsection=media_releases':
-                    date = elm.get_text(strip=True) 
-
-                data['title'].append(title)
-                data['date'].append(date)
-                data['link'].append(link)
-            except:
-                continue
-
-        return page_not_found
 
     if pagination_info:
         try:
@@ -198,7 +187,7 @@ def generic_scrape(driver, info, elements_info, pagination_info=None, url=None):
                 EC.presence_of_element_located((By.XPATH, pagination_info['pages_xpath']))
             ).text)
         except:
-            num_pages = 100
+            num_pages = 500
         for i in range(2, num_pages + 1):
             try:
                 html_source = driver.page_source
@@ -210,7 +199,7 @@ def generic_scrape(driver, info, elements_info, pagination_info=None, url=None):
                         soup = BeautifulSoup(response.text, 'html5lib')
                     except:
                         ...
-                page_not_found = extract_data(soup, elements_info, url)
+                page_not_found, table_data = extract_data(soup, elements_info, url)
                 if page_not_found or i > pagination_info['limit_pages']:
                     break
                 next_page_url = pagination_info['url_template'].format(page_number=i)
@@ -218,6 +207,7 @@ def generic_scrape(driver, info, elements_info, pagination_info=None, url=None):
             except Exception as e:
                 ...
     else:
+        page_number = 1
         while True:
             try:
                 html_source = driver.page_source
@@ -229,7 +219,7 @@ def generic_scrape(driver, info, elements_info, pagination_info=None, url=None):
                         soup = BeautifulSoup(response.text, 'html5lib')
                     except:
                         ...
-                page_not_found = extract_data(soup, elements_info, url)
+                page_not_found, table_data = extract_data(soup, elements_info, url)
                 if page_not_found:
                     break
                 page_number += 1
@@ -341,3 +331,131 @@ def combine_results_(directory=r'output_files'):
 
 def scrape_news_with_params(driver, info, source):
     return scrape_news(driver, info, source)
+
+def get_nemads(driver, info):
+    WebDriverWait(driver, 4).until(
+                EC.presence_of_element_located((By.XPATH, '/html/body/div[1]/div[1]/div/div/nav/div/a[2]'))
+            ).click()
+    
+    select_elm = WebDriverWait(driver, 4).until(
+                EC.presence_of_element_located((By.NAME, 'per_page'))
+            )
+    # Create a Select object
+    select = Select(select_elm)
+
+    # Select the last option by index
+    select.select_by_index(len(select.options) - 1)
+    
+    # Locate the <ul> element with class "pagination bootpag"
+    ul_element = driver.find_element(By.CLASS_NAME, 'pagination.bootpag')
+
+    # Find all <li> elements within the <ul>
+    li_elements = ul_element.find_elements(By.TAG_NAME, 'li')
+
+    # Get the text of the last <li> element
+    last_li_text = li_elements[-1].text
+    
+    # Extract only the number using regular expressions
+    last_li_number = int(re.findall(r'\d+', last_li_text)[0])
+    
+    info['num_pages'] = last_li_number
+    
+    # Locate the <thead> element
+    thead_element = driver.find_element(By.TAG_NAME, 'thead')
+
+    # Find all <th> elements within the <thead>
+    th_elements = thead_element.find_elements(By.TAG_NAME, 'th')
+
+    # Extract the text from each <th> element and store it in a list
+    header_values = [th.text for th in th_elements]
+    
+    info['header_values'] = header_values
+    
+    return driver, info
+
+def scrape_nemad_info(driver, info):
+    table_datas = []
+    info['url'] = info['url'].replace('#scroll_to_results', '&page=')
+    for page_number in range(2, info['num_pages'] + 2):
+        try:
+            
+            driver, info, table_data = extract_data(driver, info, elms_info={'tag_name': 'tr', 'class_':'gradeX'})
+            if table_data:
+                table_datas.extend(table_data)
+                driver.get(f"{info['url']}{page_number}")
+            else:
+                break
+            
+        except:
+            ...
+    if table_datas:
+        df = pd.DataFrame(table_datas, columns=info['header_values']).to_excel(f"{info['nemad']}.xlsx")
+    
+    try:
+        driver.get('https://my.codal.ir/')
+    except:
+        ...
+    
+    return driver, info
+
+def search_nemad(driver, info, nemad):
+    last_li_number = 1
+    
+    WebDriverWait(driver, 4).until(
+                EC.presence_of_element_located((By.CLASS_NAME, 'select2-search__field'))
+            ).send_keys(nemad)
+    
+    time.sleep(1)
+    # Simulate pressing the "Enter" key
+    WebDriverWait(driver, 4).until(
+                EC.presence_of_element_located((By.CLASS_NAME, 'select2-search__field'))
+            ).send_keys(Keys.ENTER)
+    
+    select_elm = WebDriverWait(driver, 4).until(
+                EC.presence_of_element_located((By.NAME, 'per_page'))
+            )
+    # Create a Select object
+    select = Select(select_elm)
+
+    # Select the last option by index
+    select.select_by_index(len(select.options) - 1)
+    
+    # Locate the <ul> element with class "pagination bootpag"
+    try:
+        ul_element = driver.find_element(By.CLASS_NAME, 'pagination.bootpag')
+
+        # Find all <li> elements within the <ul>
+        li_elements = ul_element.find_elements(By.TAG_NAME, 'li')
+
+        # Get the text of the last <li> element
+        last_li_text = li_elements[-1].text
+        
+        # Extract only the number using regular expressions
+        last_li_number = int(re.findall(r'\d+', last_li_text)[0])
+        
+    except:
+        pass
+    
+    info['num_pages'] = last_li_number
+    # Locate the <thead> element
+    thead_element = driver.find_element(By.TAG_NAME, 'thead')
+
+    # Find all <th> elements within the <thead>
+    th_elements = thead_element.find_elements(By.TAG_NAME, 'th')
+
+    # Extract the text from each <th> element and store it in a list
+    header_values = [th.text for th in th_elements]
+    header_values.insert(4, 'لینک اطلاعیه')
+    
+    info['header_values'] = header_values
+    
+    info['url'] = driver.current_url
+    info['symbol'] = re.search(r'symbol=(\d+)', driver.current_url).group(1) # Using regular expression to find the symbol number
+    
+    info['nemad'] = nemad
+    
+    return driver, info
+            
+    
+            
+
