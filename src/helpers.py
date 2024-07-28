@@ -85,38 +85,33 @@ def extract_dates(text, num_dates=None):
         return text
 
 @contextmanager
-def init_driver(pathsave, driver_type='firefox', headless=False, prefs={'maximize': False,
-                                                                        'zoom': '1.0'}, driver=None,
-                info={}, use_proxy=False, disable_popups=False, *args, **kwargs):
+def init_driver(pathsave, driver_type='chrome', headless=False, prefs={'maximize': False, 'zoom': '1.0'},
+                driver=None, info={}, use_proxy=False, disable_popups=False, port=0, *args, **kwargs):
     """
     Context manager for initializing and managing a Selenium WebDriver.
 
     Args:
     - pathsave (str): The directory path where downloaded files will be saved.
-    - driver_type (str): Type of the WebDriver, default is 'firefox'.
+    - driver_type (str): Type of the WebDriver, default is 'chrome'.
     - headless (bool): Whether to run the browser in headless mode, default is False.
     - prefs (dict): Dictionary of preferences for the WebDriver.
     - driver: Existing WebDriver instance, if provided.
     - info (dict): Additional information, if needed.
+    - port (int): The port to use for ChromeDriver.
     - *args, **kwargs: Additional arguments and keyword arguments.
 
     Yields:
     - driver: The initialized WebDriver instance.
-
-    Usage:
-    with init_driver(pathsave='/path/to/downloads') as driver:
-        # Your code using the WebDriver goes here
-
-    Note: Ensure proper installation of Selenium and WebDriver executables.
-
     """
     if driver_type == 'chrome':
         # Configuring options for Chrome WebDriver
         options = ChromeOptions()
-        # options.add_argument('--headless')
+        if headless:
+            options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--remote-debugging-port=9222')
+        if port:
+            options.add_argument(f'--remote-debugging-port={port}')
         prefs = {'download.default_directory': pathsave}
         options.add_argument("start-maximized")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -129,12 +124,10 @@ def init_driver(pathsave, driver_type='firefox', headless=False, prefs={'maximiz
         driver.set_page_load_timeout(15)  # Set the page load timeout to 15 seconds
 
         # Switching to the first window handle
-        driver.window_handles
         driver.switch_to.window(driver.window_handles[0])
 
     try:
         yield driver  # Providing the initialized WebDriver to the user
-
     finally:
         driver.quit()  # Ensuring WebDriver is properly closed after use
         
@@ -373,7 +366,7 @@ def get_nemads(driver, info):
     
     return driver, info
 
-def scrape_nemad_info(driver, info):
+def scrape_nemad_info(driver, info, output_path=None):
     table_datas = []
     info['url'] = info['url'].replace('#scroll_to_results', '&page=')
     for page_number in range(2, info['num_pages'] + 2):
@@ -389,7 +382,7 @@ def scrape_nemad_info(driver, info):
         except:
             ...
     if table_datas:
-        df = pd.DataFrame(table_datas, columns=info['header_values']).to_excel(f"{info['nemad']}.xlsx")
+        df = pd.DataFrame(table_datas, columns=info['header_values']).to_excel(os.path.join(output_path, f"{info['nemad']}.xlsx"))
     
     try:
         driver.get('https://my.codal.ir/')
